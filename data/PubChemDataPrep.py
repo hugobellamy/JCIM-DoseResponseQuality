@@ -107,18 +107,6 @@ def main():
         with open(f"PUBCHEM/converted_data/{AID}.pkl", "wb") as f:
             pickle.dump(data, f)
 
-        data_reduced = dt.make_X_y(
-            X,
-            dose_response,
-            dose_factor=10,
-            random_seed=RS,
-            reduce=True,
-            base_noise=NOISE,
-        )
-        with open(
-            f"PUBCHEM/converted_data/{AID}000.pkl", "wb"
-        ) as f:  # triple 0s will denote reduced data
-            pickle.dump(data_reduced, f)
 
 
 if __name__ == "__main__":
