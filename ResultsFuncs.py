@@ -2,7 +2,7 @@ from variable_bootstrap_forest import vbRandomForest
 from outputsmearing_forest import osRandomForest
 from WeightedSVM import WeightedSVM
 from sklearn.metrics import r2_score, root_mean_squared_error
-from scipy.stats import ttest_rel
+from scipy.stats import ttest_rel, wilcoxon
 import numpy as np
 import pickle
 import OptimisationFuncs as OF
@@ -13,6 +13,18 @@ import warnings
 warnings.filterwarnings(
     "ignore",
 )
+
+
+def bootstrap_mse_std(y_preds, y, bootstrap_repeats=1000):
+    rmses = []
+    for _ in range(bootstrap_repeats):
+        # Bootstrap sample
+        indices = np.random.choice(len(y), len(y), replace=True)
+        y_bootstrap = [y[i] for i in indices]
+        y_pred_bootstrap = [y_preds[i] for i in indices]
+        # Calculate RMSE
+        rmses.append(root_mean_squared_error(y_bootstrap, y_pred_bootstrap))
+    return np.std(rmses)
 
 
 def dataset_score(y_preds, dr_test, base_line_errors=None):
@@ -33,13 +45,24 @@ def dataset_score(y_preds, dr_test, base_line_errors=None):
             root_mean_squared_error(actual, predicted),
             r2_score(actual, predicted),
             [(i - j) ** 2 for i, j in zip(predicted, actual)],
+            bootstrap_mse_std(predicted, actual),
         )
     model_errors = [(i - j) ** 2 for i, j in zip(predicted, actual)]
-    sig_score = ttest_rel(base_line_errors, model_errors, alternative="greater").pvalue
+    if np.sum(np.array(model_errors) - np.array(base_line_errors)) == 0:
+        sig_scores = (
+            ttest_rel(base_line_errors, model_errors, alternative="greater").pvalue,
+            "error",
+        )
+    else:
+        sig_scores = (
+            ttest_rel(base_line_errors, model_errors, alternative="greater").pvalue,
+            wilcoxon(base_line_errors, model_errors, alternative="greater").pvalue,
+        )
     return (
         root_mean_squared_error(actual, predicted),
         r2_score(actual, predicted),
-        sig_score,
+        sig_scores,
+        bootstrap_mse_std(predicted, actual),
     )
 
 
@@ -124,7 +147,7 @@ def get_full_results(
     y_uncert = np.array([np.exp(-x) for x in y_uncert])
     results = {}
 
-    base_mse, base_r2, base_line_errors = VB_result(
+    base_mse, base_r2, base_line_errors, std = VB_result(
         X,
         y,
         y_uncert,
@@ -134,7 +157,7 @@ def get_full_results(
         n_ests,
         random_state,
     )
-    results["base"] = (base_mse, base_r2, "N/A")
+    results["base"] = (base_mse, base_r2, "N/A", std)
     results["vb"] = VB_result(
         X,
         y,
@@ -157,7 +180,7 @@ def get_full_results(
         random_state,
         base_line_errors,
     )
-    os_mse, os_r2, os_line_errors = OS_result(
+    os_mse, os_r2, os_line_errors, os_std = OS_result(
         X,
         y,
         y_uncert,
@@ -167,7 +190,7 @@ def get_full_results(
         n_ests,
         random_state,
     )
-    results["os"] = (os_mse, os_r2, "N/A")
+    results["os"] = (os_mse, os_r2, "N/A", os_std)
     results["vos"] = OS_result(
         X,
         y,
@@ -179,10 +202,10 @@ def get_full_results(
         random_state,
         os_line_errors,
     )
-    svr_mse, svr_r2, svr_line_errors = SVR_result(
+    svr_mse, svr_r2, svr_line_errors, svr_std = SVR_result(
         X, y, y_uncert, X_test, dr_test, optimised_params["svm"]
     )
-    results["svm"] = (svr_mse, svr_r2, "N/A")
+    results["svm"] = (svr_mse, svr_r2, "N/A", svr_std)
     results["wsvm"] = SVR_result(
         X,
         y,
@@ -192,47 +215,6 @@ def get_full_results(
         optimised_params["wsvm"],
         svr_line_errors,
     )
-
-    if bayes:
-        y_uncert_alt = [1 / i for i in y_uncert]
-
-        results["vb_alt"] = results["vb"] = VB_result(
-            X,
-            y,
-            y_uncert_alt,
-            X_test,
-            dr_test,
-            optimised_params["vb_alt"],
-            n_ests,
-            random_state,
-            base_line_errors,
-        )
-
-        results["w_alt"] = VB_result(
-            X,
-            y,
-            y_uncert_alt,
-            X_test,
-            dr_test,
-            optimised_params["w_alt"],
-            n_ests,
-            random_state,
-            base_line_errors,
-        )
-
-        results["svm_alt"] = SVR_result(
-            X,
-            y,
-            y_uncert_alt,
-            X_test,
-            dr_test,
-            optimised_params["svm_alt"],
-            svr_line_errors,
-        )
-    else:
-        results["vb_alt"] = ("NA", "NA", "NA")
-        results["w_alt"] = ("NA", "NA", "NA")
-        results["svm_alt"] = ("NA", "NA", "NA")
     return results
 
 
@@ -245,7 +227,7 @@ def test_dataset(id, random_state, n_estimators, source="PUBCHEM"):
     else:
         test_size = 0.5
     for i in range(2):
-        data = OF.load_data(id, i, source=source, test=True)
+        data = OF.load_data(id, i, source=source)
         X, y, y_uncert, dose_response = data
         X_train, X_test, y_train, _, y_uncert_train, _, _, DR_test = train_test_split(
             X,

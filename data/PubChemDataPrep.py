@@ -8,13 +8,21 @@ from rdkit import Chem
 from rdkit.Chem import rdFingerprintGenerator
 import os
 
-
-files = os.listdir("PubChem/raw")
-files = [files[i] for i in range(len(files)) if "datatable" in files[i]]
-AIDS_to_convert = [int(files[i].split("_")[1]) for i in range(len(files))]
 RS = 32425
 NOISE = 176
 np.random.seed(RS)
+AIDS_to_convert = [
+    1902,
+    2382,
+    435010,
+    463203,
+    624273,
+    687027,
+    720512,
+    1259418,
+    1259420,
+    504313,
+]
 
 
 def fingerprints_from_smiles(smiles, radius=2, nbits=1024):
@@ -42,8 +50,14 @@ def get_dose_response(val, keys, multiplyer=1):
     dose_response = []
     for key in keys:
         response = val[key]
+
         if np.isfinite(float(response)):
-            dose_response.append([keys[key], multiplyer * float(response)])
+            response = multiplyer * float(response)
+            if response > 100:
+                response = 100
+            if response < 0:
+                response = 0
+            dose_response.append([keys[key], float(response)])
     return dose_response
 
 
@@ -56,7 +70,7 @@ def main():
     for AID in AIDS_to_convert:
         print("AID:", AID)
         datatable = pd.read_csv(
-            f"PubChem/raw/AID_{AID}_datatable.csv", low_memory=False
+            f"PUBCHEM/raw/AID_{AID}_datatable.csv", low_memory=False
         )
         data_info = All_data_info[f"AID_{AID}"]
         datatable.drop(data_info["rows"], inplace=True)
@@ -106,7 +120,6 @@ def main():
         )
         with open(f"PUBCHEM/converted_data/{AID}.pkl", "wb") as f:
             pickle.dump(data, f)
-
 
 
 if __name__ == "__main__":
